@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 
+import mxnet as mx
 import numpy as np
 
 from gluonts.core.component import validated
@@ -55,8 +56,8 @@ class Binomial(Distribution):
     def sample(self, num_samples: Optional[int] = None, dtype=np.int32) -> Tensor:
         def s(n: Tensor, mu: Tensor) -> Tensor:
             F = self.F
-            return F.broadcast_lesser(F.sample_uniform(lower=np.zeros(self.n),
-                                                       upper=np.ones(self.n)),
+            return F.broadcast_lesser(F.sample_uniform(low=mx.ndarray.zeros(self.p.shape[0]),
+                                                       high=mx.ndarray.ones(self.p.shape[0])),
                                       self.p)
 
 
@@ -73,8 +74,11 @@ class BinomialOutput(DistributionOutput):
 
     @classmethod
     def domain_map(cls, F, mu, n):
-        mu = softplus(self.mu)
-        n = abs(round(self.n))
+        epsilon = np.finfo(cls._dtype).eps  # machine epsilon
+
+        mu = softplus(F, mu) + epsilon
+        n = F.round(softplus(F, n) + 0.5 + epsilon)
+        return mu.squeeze(axis=-1), n.squeeze(axis=-1)
 
     def distribution(
         self,

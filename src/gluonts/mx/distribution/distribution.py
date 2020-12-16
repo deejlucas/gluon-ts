@@ -30,6 +30,10 @@ def softplus(F, x: Tensor) -> Tensor:
     return F.Activation(x, act_type="softrelu")
 
 
+def sigmoid(F, x: Tensor) -> Tensor:
+    return F.Activation(x, act_type="sigmoid")
+
+
 def getF(var: Tensor):
     if isinstance(var, mx.nd.NDArray):
         return mx.nd

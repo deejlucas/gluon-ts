@@ -7,7 +7,7 @@ from gluonts.core.component import validated
 from gluonts.mx import Tensor
 
 from .deterministic import DeterministicOutput
-from .distribution import _sample_multiple, Distribution, getF, softplus
+from .distribution import _sample_multiple, Distribution, getF, sigmoid, softplus
 from .distribution_output import DistributionOutput
 from .mixture import MixtureDistributionOutput
 
@@ -20,11 +20,10 @@ class Binomial(Distribution):
     is_reparameterizable = False
 
     @validated()
-    def __init__(self, mu: Tensor, n: Tensor) -> None:
+    def __init__(self, mu: Tensor, p: Tensor) -> None:
         self.mu = mu
-        self.n = n
-        self.p = self.mu / self.n
-        self.q = 1 - self.p
+        self.p = p
+        self.n = self.mu / self.p
 
     @property
     def F(self):
@@ -43,7 +42,7 @@ class Binomial(Distribution):
         return 0
 
     def log_prob(self, x: Tensor) -> Tensor:
-        return x * self.F.log(self.p) + (self.n - x) * self.F.log(1 - self.p)
+        return x * self.F.log(self.p) + (self.mu / self.p - x) * self.F.log(1 - self.p)
 
     @property
     def mean(self) -> Tensor:
@@ -56,12 +55,12 @@ class Binomial(Distribution):
     def sample(self, num_samples: Optional[int] = None, dtype=np.int32) -> Tensor:
         def s(n: Tensor, mu: Tensor) -> Tensor:
             F = self.F
-            return F.broadcast_lesser(F.sample_uniform(low=mx.ndarray.zeros(self.p.shape[0]),
-                                                       high=mx.ndarray.ones(self.p.shape[0])),
+            return F.broadcast_lesser(F.sample_uniform(low=F.zeros_like(self.p),
+                                                       high=F.ones_like(self.p)),
                                       self.p)
 
 
-        return _sample_multiple(s, mu=self.mu, n=self.n, num_samples=num_samples)
+        return _sample_multiple(s, mu=self.mu, n=self.p, num_samples=num_samples)
 
     @property
     def args(self) -> List:
@@ -69,16 +68,16 @@ class Binomial(Distribution):
 
 
 class BinomialOutput(DistributionOutput):
-    args_dim: Dict[str, int] = {"mu": 1, "n": 1}
+    args_dim: Dict[str, int] = {"mu": 1, "p": 1}
     distr_cls: type = Binomial
 
     @classmethod
-    def domain_map(cls, F, mu, n):
+    def domain_map(cls, F, mu, p):
         epsilon = np.finfo(cls._dtype).eps  # machine epsilon
 
         mu = softplus(F, mu) + epsilon
-        n = F.round(softplus(F, n) + 0.5 + epsilon)
-        return mu.squeeze(axis=-1), n.squeeze(axis=-1)
+        p = sigmoid(F, p)
+        return mu.squeeze(axis=-1), p.squeeze(axis=-1)
 
     def distribution(
         self,

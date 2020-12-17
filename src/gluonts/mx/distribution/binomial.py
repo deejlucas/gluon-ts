@@ -7,9 +7,16 @@ from gluonts.core.component import validated
 from gluonts.mx import Tensor
 
 from .deterministic import DeterministicOutput
-from .distribution import _sample_multiple, Distribution, getF, sigmoid, softplus
+from .distribution import (
+    _sample_multiple,
+    Distribution,
+    getF,
+    sigmoid,
+    softplus,
+)
 from .distribution_output import DistributionOutput
 from .mixture import MixtureDistributionOutput
+
 
 class Binomial(Distribution):
     """
@@ -42,7 +49,9 @@ class Binomial(Distribution):
         return 0
 
     def log_prob(self, x: Tensor) -> Tensor:
-        return x * self.F.log(self.p) + (self.mu / self.p - x) * self.F.log(1 - self.p)
+        return x * self.F.log(self.p) + (self.mu / self.p - x) * self.F.log(
+            1 - self.p
+        )
 
     @property
     def mean(self) -> Tensor:
@@ -50,17 +59,61 @@ class Binomial(Distribution):
 
     @property
     def stddev(self) -> Tensor:
-        return self.n * self.p * self.q
+        return self.n * self.p * (1 - self.p)
 
-    def sample(self, num_samples: Optional[int] = None, dtype=np.int32) -> Tensor:
+    def pmf(self, x):
+        F = self.F
+        px = (
+            F.gamma(self.n)
+            / (F.gamma(x) * F.gamma(self.n - x))
+            * (self.p ** x)
+            * (1 - self.p) ** (self.n - x)
+        )
+        # For non-integer n, n < k < n + 1 can output a negative probability
+        px = F.where(px < 0, F.zeros_like(px), px)
+
+        return px
+
+    def sample(
+        self, num_samples: Optional[int] = None, dtype=np.int32
+    ) -> Tensor:
         def s(n: Tensor, mu: Tensor) -> Tensor:
             F = self.F
-            return F.broadcast_lesser(F.sample_uniform(low=F.zeros_like(self.p),
-                                                       high=F.ones_like(self.p)),
-                                      self.p)
+            max_n = int(F.ceil(F.max(n) + 1).asscalar())
+            counts = mx.nd.array(range(max_n))
+            pmf = self.pmf(counts)
+            # For k > n + 1, probability is undefined. Practical to interpret as
+            # 0 when building our cumulative table.
+            pmf = F.where(mx.nd.contrib.isnan(pmf), F.zeros_like(pmf), pmf)
 
+            # due to rounding, final sum could be greater than one
+            cdf = F.clip(F.cumsum(pmf, 1), 0, 1)
 
-        return _sample_multiple(s, mu=self.mu, n=self.p, num_samples=num_samples)
+            # due to rounding, final sum could be less than one, so we scale
+            row_max = F.expand_dims(F.max(cdf, axis=1), 1)
+            cdf = cdf / row_max
+
+            # We get a sample from the uniform distribution and transform it to
+            # a value from the Binomial CDF
+            lessers = F.broadcast_lesser(
+                F.sample_uniform(
+                    low=F.zeros_like(self.p), high=F.ones_like(self.p)
+                ),
+                cdf,
+            )
+
+            # We create an array of potential counts of the same shape
+            counts_arr = counts * F.ones_like(lessers)
+
+            # We would like the minimum count satisfying the PMF, so we inflate
+            # values above our random sample
+            counts_arr = F.where(lessers, counts_arr, max_n * counts_arr + 1)
+
+            return F.expand_dims(F.min(counts_arr, axis=1), 1)
+
+        return _sample_multiple(
+            s, mu=self.mu, n=self.p, num_samples=num_samples
+        )
 
     @property
     def args(self) -> List:

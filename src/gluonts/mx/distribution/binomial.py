@@ -64,8 +64,8 @@ class Binomial(Distribution):
     def pmf(self, x):
         F = self.F
         px = (
-            F.gamma(self.n)
-            / (F.gamma(x) * F.gamma(self.n - x))
+            F.gamma(self.n + 1)
+            / (F.gamma(x + 1) * F.gamma(self.n - x + 1))
             * (self.p ** x)
             * (1 - self.p) ** (self.n - x)
         )
@@ -80,7 +80,7 @@ class Binomial(Distribution):
         def s(mu: Tensor, p: Tensor) -> Tensor:
             F = self.F
             n = mu / p
-            max_n = int(F.ceil(mx.np.nanmax(n) + 1).asscalar())
+            max_n = int(F.ceil(F.max(n) + 1).asscalar())
             counts = mx.nd.array(range(max_n))
             pmf = self.pmf(counts)
             # For k > n + 1, probability is undefined. Practical to interpret as
@@ -106,7 +106,7 @@ class Binomial(Distribution):
 
             # We would like the minimum count satisfying the PMF, so we inflate
             # values above our random sample
-            counts_arr = F.where(lessers, counts_arr, max_n * counts_arr + 1)
+            counts_arr = F.where(lessers, counts_arr, max_n * (counts_arr + 1))
 
             return F.expand_dims(F.min(counts_arr, axis=1), 1)
 

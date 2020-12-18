@@ -77,9 +77,10 @@ class Binomial(Distribution):
     def sample(
         self, num_samples: Optional[int] = None, dtype=np.int32
     ) -> Tensor:
-        def s(n: Tensor, mu: Tensor) -> Tensor:
+        def s(mu: Tensor, p: Tensor) -> Tensor:
             F = self.F
-            max_n = int(F.ceil(F.max(n) + 1).asscalar())
+            n = mu / p
+            max_n = int(F.ceil(mx.np.nanmax(n) + 1).asscalar())
             counts = mx.nd.array(range(max_n))
             pmf = self.pmf(counts)
             # For k > n + 1, probability is undefined. Practical to interpret as
@@ -96,9 +97,7 @@ class Binomial(Distribution):
             # We get a sample from the uniform distribution and transform it to
             # a value from the Binomial CDF
             lessers = F.broadcast_lesser(
-                F.sample_uniform(
-                    low=F.zeros_like(self.p), high=F.ones_like(self.p)
-                ),
+                F.sample_uniform(low=F.zeros_like(p), high=F.ones_like(p)),
                 cdf,
             )
 
@@ -112,12 +111,12 @@ class Binomial(Distribution):
             return F.expand_dims(F.min(counts_arr, axis=1), 1)
 
         return _sample_multiple(
-            s, mu=self.mu, n=self.p, num_samples=num_samples
+            s, mu=self.mu, p=self.p, num_samples=num_samples
         )
 
     @property
     def args(self) -> List:
-        return [self.mu, self.n]
+        return [self.mu, self.p]
 
 
 class BinomialOutput(DistributionOutput):
@@ -138,13 +137,13 @@ class BinomialOutput(DistributionOutput):
         loc: Optional[Tensor] = None,
         scale: Optional[Tensor] = None,
     ) -> Binomial:
-        mu, n = distr_args
+        mu, p = distr_args
         if scale is None:
-            return Binomial(mu, n)
+            return Binomial(mu, p)
         else:
             F = getF(mu)
             mu = F.broadcast_mul(mu, scale)
-            return Binomial(mu, n, F)
+            return Binomial(mu, p, F)
 
     @property
     def event_shape(self) -> Tuple:

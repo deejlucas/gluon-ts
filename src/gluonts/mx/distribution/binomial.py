@@ -150,6 +150,38 @@ class BinomialOutput(DistributionOutput):
         return ()
 
 
+class BinomialKnownNOutput(BinomialOutput):
+    args_dim: Dict[str, int] = {"p": 1}
+
+    def __init__(self, n):
+        self.n = n
+
+    @classmethod
+    def domain_map(cls, F, p):
+        p = sigmoid(F, p)
+        return p.squeeze(axis=-1)
+
+    def distribution(
+        self,
+        distr_args,
+        loc: Optional[Tensor] = None,
+        scale: Optional[Tensor] = None,
+    ) -> Binomial:
+        p = distr_args
+        mu = self.n * p
+        if scale is None:
+            return Binomial(mu, p)
+        else:
+            F = getF(mu)
+            mu = F.broadcast_mul(mu, scale)
+            return Binomial(mu, p, F)
+
+
 class ZeroInflatedBinomialOutput(MixtureDistributionOutput):
     def __init__(self):
         super().__init__([BinomialOutput(), DeterministicOutput(0)])
+
+
+class ZeroInflatedBinomialKnownNOutput(MixtureDistributionOutput):
+    def __init__(self, n: int):
+        super().__init__([BinomialKnownNOutput(n), DeterministicOutput(0)])
